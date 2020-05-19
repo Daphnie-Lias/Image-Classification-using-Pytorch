@@ -1,4 +1,4 @@
-#Import libraries
+"""Package Imports"""
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
@@ -14,27 +14,28 @@ import time
 from PIL import Image
 import argparse
 
-#Functions
-# define Mandatory and Optional Arguments for the script
+"""Function Definitions"""
+
 def arg_parser():
     
     parser = argparse.ArgumentParser (description = "Neural Network Training Parser")
-
-    parser.add_argument ('data_dir', help = 'Provide data directory. Mandatory argument', type = str)
-    parser.add_argument ('--arch', help = 'Name of predefine model, if not specified  vgg16 will be used', type = str)
+    parser.add_argument ('data_dir', help = 'Default flowers directory provided inside code. Optionalargument ', type = str)
+    parser.add_argument ('--save_dir', help = 'Provide saving directory. Optional argument', type = str)
+    parser.add_argument ('--arch', help = 'Default is vgg16,otherwise alternate option densenet should be given as argument', type = str)
     parser.add_argument ('--hidden_units', help = 'Hidden units in Classifier. Default value is 512', type = int)
-    parser.add_argument ('--epochs', help = 'Number of epochs, default 20', type = int)
-    parser.add_argument ('--GPU', help = "Option to use GPU", type = str)
-    parser.add_argument('--learning_rate',type=float,help='Define gradient descent learning rate as float')
-    
+    parser.add_argument ('--epochs', help = 'Number of epochs or passes , default 5', type = int)
+    parser.add_argument ('--GPU', help = "Specify GPU or default mode is cpu, optional argument", type = str)
+    parser.add_argument('--learning_rate',type=float,help='Define gradient descent learning rate as float. Default 0.001. Optional argument')
+#     This implementation accepts 2 pre trained models (vgg16 : default and alexnet)
+#     Sample Input:
+#     python train.py data_dir --arch ‘alexnet' --learning_rate 0.01 --hidden_units 512 --epochs 3
     args = parser.parse_args()
     return args
 
 
-#Data transformer for training, validation, testing data sets
-
+"""Training Data Augmentation"""
 def train_transform(train_dir):
-   
+     
     data_transforms_train = transforms.Compose ([transforms.RandomRotation (30),
                                              transforms.RandomResizedCrop (224),
                                              transforms.ColorJitter(),
@@ -44,6 +45,7 @@ def train_transform(train_dir):
                                             ])
 
     # Load the Data using Image Folder
+    """Data Loading"""
     image_datasets_train = dset.ImageFolder (train_dir, transform = data_transforms_train)
     return image_datasets_train
 
@@ -71,7 +73,8 @@ def test_transform(test_dir):
     image_datasets_test = dset.ImageFolder (test_dir, transform = data_transforms_test)
     return image_datasets_test
 
-#Data Loader
+
+"""Data Batching"""
 def data_loader(train_dir,valid_dir,test_dir):
    
     data_loader_train = torch.utils.data.DataLoader(train_transform(train_dir), batch_size = 64, shuffle = True)
@@ -85,53 +88,68 @@ def data_loader(train_dir,valid_dir,test_dir):
 
 def check_gpu(gpu):
     #defining device: either cuda or cpu
-    if type(gpu) == type(None): 
+#     If gpu parameter is not specified 
+    if not gpu:
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    else:
+    
+    # If gpu_arg then make sure to check for CUDA before assigning it
+    elif gpu:
         device = gpu
-
-    return device    
+    
+    return device
     
     
 #Load predefined models based ona arch argument
-def model_loader(architecture="vgg16"):
+"""Usage of Pre-trained network"""
+def model_loader(architecture):
     
-    if type(architecture) == type(None): 
+    if type(architecture) == type(None):
         model = models.vgg16(pretrained=True)
         model.name = "vgg16"
-        print("Network architecture specified as vgg16.")
+        print("Setting default Network architecture as vgg16.")
+    elif architecture == 'densenet':
+        model = models.densenet161(pretrained=True)
+        model.name = "densenet161"
+        print("Network architecture specified as densenet161")
     else:
-        print("Using Network architecture {}".format(architecture))
-        model = models.vgg13(pretrained=True)
-        model.name = "vgg13"
-#         exec("model = models.{}(pretrained=True)".format(architecture))
-#         model.name = architecture
-    
+        model = models.vgg16(pretrained=True)
+        model.name = "vgg16"
+        print("Setting default Network architecture as vgg16.")
     # Freeze parameters so we don't backprop through them
     for param in model.parameters():
         param.requires_grad = False 
     return model
+    
 
-# Define classfier witb RLU activations and dropout
 
-def classifier(model,hidden_units):
+"""Usage of Feedforward Classifier"""
+def classifier(model,hidden_units,architecture):
     if type(hidden_units) == type(None): 
         hidden_units = 4096 #hyperparamters
-        
+    
+    # Find Input Layers
+    if type(architecture) == type(None):
+#         Loads input features for vgg architecture
+        input_features = model.classifier[0].in_features 
+    elif architecture == 'densenet':
+#         densenet part
+        input_features = model.classifier.in_features
+    else:
+        input_features = model.classifier[0].in_features 
+
     classifier = nn.Sequential(OrderedDict([
-                          ('fc1', nn.Linear(25088, hidden_units, bias=True)),
+                          ('fc1', nn.Linear(input_features, hidden_units, bias=True)),
                           ('relu1', nn.ReLU()),
                           ('dropout1', nn.Dropout(p=0.5)),
                           ('fc2', nn.Linear(hidden_units, 102, bias=True)),
                           ('output', nn.LogSoftmax(dim=1))
                           ]))
-
-    model.classifier = classifier
     return classifier
    
 
 
-#Validation pass
+
+"""Testing Accuracy"""
 def test_accuracy(model, test_loader,device):
     model.to (device)
     model.eval()
@@ -156,6 +174,7 @@ def test_accuracy(model, test_loader,device):
 
 
 # Function network_trainer represents the training of the network model
+"""Training and Validatin Accuracy and Accuracy"""
 def network_trainer(model, dataloaders,criterion,optimizer,device, epochs):
     
     running_loss = 0
@@ -215,7 +234,8 @@ def network_trainer(model, dataloaders,criterion,optimizer,device, epochs):
     return model
 
 # Function initial_checkpoint(Model, Save_Dir, Train_data) saves the model at a defined checkpoint
-def initial_checkpoint(model, Train_data):
+"""Saving Model"""
+def initial_checkpoint(model, Train_data,save_dir):
     
     model.class_to_idx = Train_data.class_to_idx
     checkpoint = {'architecture': model.name,
@@ -223,7 +243,13 @@ def initial_checkpoint(model, Train_data):
              'class_to_idx': model.class_to_idx,
              'state_dict': model.state_dict()}
 
-    torch.save(checkpoint, 'other_testing_checkpoint.pth')
+    if type(save_dir) == type(None):
+        
+        torch.save (checkpoint, 'checkpoint.pth')
+        
+    else:
+        torch.save (checkpoint, save_dir + '/checkpoint.pth')
+    
     print('Checkpoint saved')
        
             
@@ -250,7 +276,7 @@ def main():
     model = model_loader(architecture=args.arch)
     
     # Build Classifier
-    model.classifier = classifier(model,hidden_units=args.hidden_units)
+    model.classifier = classifier(model,hidden_units=args.hidden_units,architecture=args.arch)
      
     # Check for GPU
     device = check_gpu(gpu=args.GPU)
@@ -275,10 +301,11 @@ def main():
     
     # Save the model as checkpoint
     
-    initial_checkpoint(trained_model, image_datasets[0])
+    initial_checkpoint(trained_model, image_datasets[0],args.save_dir)
 
 
 # =============================================================================
 # Run Program
+  
 # =============================================================================
 if __name__ == '__main__': main()            
